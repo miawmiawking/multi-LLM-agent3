@@ -1,0 +1,7 @@
+streamlit==1.41.1
+langchain
+requests
+PyPDF2
+python-docx
+chardet
+openai==1.58.1
