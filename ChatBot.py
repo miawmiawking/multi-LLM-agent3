@@ -1,6 +1,6 @@
 import requests
 import streamlit as st
-from langchain.tools import DuckDuckGoSearchRun
+from langchain_community.tools import DuckDuckGoSearchRun
 import PyPDF2
 from docx import Document
 import pandas as pd
@@ -8,9 +8,9 @@ import chardet
 import base64
 import io
 from langchain.docstore.document import Document as LC_Document # 新增 langchain 相关依赖
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain.llms import HuggingFaceHub
 import tempfile

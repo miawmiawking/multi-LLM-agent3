@@ -10,4 +10,7 @@ chromadb==0.6.3
 pydub==0.25.1
 openai==1.58.1
 beautifulsoup4==4.12.3
-duckduckgo_search==7.2.1
+langchain-community>=0.0.10
+langchain-text-splitters>=0.0.1
+duckduckgo-search>=4.1.1
+sentence-transformers>=2.2.2
