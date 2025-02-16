@@ -144,6 +144,10 @@ def get_vector_store():
         # 更新session state中的路径
         st.session_state.chromadb_path = temp_dir
         
+        # 如果向量库已经在会话状态中，直接返回
+        if "vector_store" in st.session_state and st.session_state.vector_store is not None:
+            return st.session_state.vector_store
+            
         # 获取 embeddings
         embeddings = get_embeddings()
         if not embeddings:
@@ -151,18 +155,31 @@ def get_vector_store():
             
         # 如果存在现有索引，则加载
         if os.path.exists(db_path):
-            with open(db_path, "rb") as f:
-                vectorstore = pickle.load(f)
+            try:
+                with open(db_path, "rb") as f:
+                    vectorstore = pickle.load(f)
                 # 更新 embeddings
                 vectorstore._embedding_function = embeddings
+                st.session_state.vector_store = vectorstore
                 return vectorstore
+            except Exception as e:
+                st.error(f"加载现有索引失败：{str(e)}")
+                # 如果加载失败，删除损坏的索引
+                os.remove(db_path)
                 
-        # 否则创建新的向量库
-        return FAISS.from_texts(
-            texts=["初始化文档"],  # 需要至少一个文档初始化
-            embedding=embeddings
-        )
-        
+        # 创建新的向量库
+        try:
+            vectorstore = FAISS.from_texts(
+                texts=["初始化文档"],
+                embedding=embeddings
+            )
+            st.session_state.vector_store = vectorstore
+            return vectorstore
+            
+        except Exception as e:
+            st.error(f"创建新向量库失败：{str(e)}")
+            return None
+            
     except Exception as e:
         st.error(f"初始化向量库失败：{str(e)}")
         import traceback
@@ -444,10 +461,10 @@ def rag_index_document(content, source):
             st.error("⚠️ 内容为空")
             return False
             
-        # 文本分割
+        # 文本分割，减小块大小
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
+            chunk_size=500,  # 减小块大小
+            chunk_overlap=50,  # 减小重叠
             length_function=len,
         )
         texts = text_splitter.split_text(content)
@@ -456,19 +473,28 @@ def rag_index_document(content, source):
             st.error("⚠️ 文本分割后为空")
             return False
             
+        # 限制文本块数量
+        max_chunks = 100
+        if len(texts) > max_chunks:
+            st.warning(f"文档过大，将只处理前 {max_chunks} 个文本块")
+            texts = texts[:max_chunks]
+            
         # 获取向量库实例
         vectorstore = get_vector_store()
         if not vectorstore:
             return False
         
         try:
-            # 添加文档
-            metadatas = [{"source": source} for _ in texts]
-            vectorstore.add_texts(
-                texts=texts,
-                metadatas=metadatas
-            )
-            
+            # 分批添加文档
+            batch_size = 20
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i+batch_size]
+                batch_metadatas = [{"source": source} for _ in batch_texts]
+                vectorstore.add_texts(
+                    texts=batch_texts,
+                    metadatas=batch_metadatas
+                )
+                
             # 保存向量库
             import tempfile
             temp_dir = tempfile.gettempdir()
@@ -496,39 +522,51 @@ def rag_index_document(content, source):
 
 def rag_generate_response(query):
     """生成 RAG 响应"""
-    # 获取向量库实例
-    vectorstore = get_vector_store()
-    if not vectorstore:
-        return "请先上传文件或网址到知识库。"
-    
     try:
-        # 执行相似性搜索
-        docs = vectorstore.similarity_search(query, k=3)
+        # 获取向量库实例
+        vectorstore = get_vector_store()
+        if not vectorstore:
+            return "请先上传文件或网址到知识库。"
         
-        if not docs:
-            return "未找到相关信息。请尝试调整问题或添加更多相关文档。"
+        # 限制相似性搜索的数量
+        k = 2  # 减少返回的文档数量
         
-        # 构建提示词
-        context = "\n\n".join([doc.page_content for doc in docs])
-        sources = "\n".join([f"- {doc.metadata.get('source', '未知来源')}" for doc in docs])
-        
-        prompt = f"""基于以下参考信息回答问题：
+        try:
+            # 执行相似性搜索
+            docs = vectorstore.similarity_search(query, k=k)
+            
+            if not docs:
+                return "未找到相关信息。请尝试调整问题或添加更多相关文档。"
+            
+            # 限制上下文长度
+            max_context_length = 2000
+            context = "\n\n".join([doc.page_content[:max_context_length] for doc in docs])
+            sources = "\n".join([f"- {doc.metadata.get('source', '未知来源')}" for doc in docs])
+            
+            # 构建提示词
+            prompt = f"""基于以下参考信息回答问题。如果参考信息不足以回答问题，请明确说明。
 
 参考信息：
 {context}
 
 问题：{query}
 
-请提供准确、相关的回答。如果参考信息不足以回答问题，请明确说明。
+请提供准确、相关的回答。
 """
-        # 调用模型生成回答
-        response = call_model_api(prompt, st.session_state.selected_model)
-        if response:
-            return f"{response}\n\n来源：\n{sources}"
-        return "生成回答失败，请重试。"
-    
+            # 调用模型生成回答
+            response = call_model_api(prompt, st.session_state.selected_model)
+            if response:
+                return f"{response}\n\n来源：\n{sources}"
+            return "生成回答失败，请重试。"
+            
+        except Exception as e:
+            st.error(f"搜索相关文档失败：{str(e)}")
+            return "处理查询时出错，请重试。"
+            
     except Exception as e:
         st.error(f"❌ 生成回答失败：{str(e)}")
+        import traceback
+        st.error(f"详细错误：{traceback.format_exc()}")
         return None
 
 def handle_file_upload(uploaded_files):
