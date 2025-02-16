@@ -143,7 +143,8 @@ def get_vector_store():
         # 初始化 embeddings
         embeddings = HuggingFaceEmbeddings(
             model_name="all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'}
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
         )
         
         # 创建向量库实例
@@ -431,6 +432,18 @@ def handle_response(response, rag_data=None):
         return None
 
 # 使用 langchain 实现 RAG：加载文档、分割、嵌入、索引
+def get_embeddings():
+    """获取 embeddings 实例"""
+    try:
+        return HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
+    except Exception as e:
+        st.error(f"初始化 embeddings 失败：{str(e)}")
+        return None
+
 def rag_index_document(content, source):
     """将文档添加到向量数据库"""
     try:
@@ -451,38 +464,39 @@ def rag_index_document(content, source):
             st.error("⚠️ 文本分割后为空")
             return False
             
-        # 初始化 embeddings
-        embeddings = HuggingFaceEmbeddings(
-            model_name="all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'}
-        )
+        # 获取 embeddings
+        embeddings = get_embeddings()
+        if not embeddings:
+            return False
         
         # 创建或获取向量库实例
-        vectorstore = Chroma(
-            collection_name=COLLECTION_NAME,
-            embedding_function=embeddings,
-            persist_directory=st.session_state.chromadb_path
-        )
+        try:
+            vectorstore = Chroma(
+                collection_name=COLLECTION_NAME,
+                embedding_function=embeddings,
+                persist_directory=st.session_state.chromadb_path
+            )
+        except Exception as e:
+            st.error(f"创建向量库实例失败：{str(e)}")
+            return False
         
         # 为每个文本块添加源信息
         metadatas = [{"source": source} for _ in texts]
         
         # 添加文档
-        vectorstore.add_texts(
-            texts=texts,
-            metadatas=metadatas
-        )
-        
-        # 保存更改
-        vectorstore.persist()
-        
-        # 更新会话状态
-        st.session_state.vector_store = vectorstore
-        
-        # 打印调试信息
-        st.info(f"✅ 成功添加 {len(texts)} 个文本块到知识库")
-        return True
-        
+        try:
+            vectorstore.add_texts(
+                texts=texts,
+                metadatas=metadatas
+            )
+            vectorstore.persist()
+            st.session_state.vector_store = vectorstore
+            st.info(f"✅ 成功添加 {len(texts)} 个文本块到知识库")
+            return True
+        except Exception as e:
+            st.error(f"添加文本到向量库失败：{str(e)}")
+            return False
+            
     except Exception as e:
         st.error(f"❌ 添加文档到向量库失败：{str(e)}")
         import traceback
