@@ -5,7 +5,6 @@ PyPDF2==3.0.1
 python-docx==1.1.2
 pandas==2.0.3
 chardet==5.2.0
-base64==0.1.0
 huggingface-hub==0.28.1
 chromadb==0.6.3
 pydub==0.25.1
