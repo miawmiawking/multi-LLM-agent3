@@ -130,7 +130,7 @@ if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
 
 # 页面配置
-st.set_page_config(page_title="多模型智能助手", layout="wide")
+st.set_page_config(page_title="多模型智能助手2.0", layout="wide")
 
 # 初始化/加载 langchain 封装的 Chroma 向量库
 def get_vector_store():
@@ -1185,7 +1185,7 @@ with st.sidebar:
 # ====================
 # 主界面布局
 # ====================
-st.title("🤖 多模型智能助手")
+st.title("🤖 多模型智能助手2.0")
 
 # 文件和网址上传区域
 st.markdown("### 📁 文件上传")
@@ -1441,8 +1441,4 @@ for msg in st.session_state.messages:
             st.image(msg["content"])
         else:
             st.write(msg["content"])
-
-
-
-
 
