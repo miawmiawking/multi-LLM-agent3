@@ -8,7 +8,7 @@ import base64
 import io
 from langchain.docstore.document import Document as LC_Document # 新增 langchain 相关依赖
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain.llms import HuggingFaceHub
@@ -141,10 +141,8 @@ def get_vector_store():
     
     try:
         # 初始化 embeddings
-        embeddings = HuggingFaceBgeEmbeddings(
-            model_name="BAAI/bge-small-zh",
-            model_kwargs={'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True},
+        embeddings = HuggingFaceEmbeddings(
+            model_name="shibing624/text2vec-base-chinese",
             cache_folder="models"
         )
         
@@ -436,17 +434,10 @@ def handle_response(response, rag_data=None):
 def get_embeddings():
     """获取 embeddings 实例"""
     try:
-        # 使用 BGE 嵌入模型
-        model_name = "BAAI/bge-small-zh"  # 使用中文小模型，速度快，效果好
-        
-        model_kwargs = {'device': 'cpu'}
-        encode_kwargs = {'normalize_embeddings': True}  # 规范化嵌入向量
-        
-        embeddings = HuggingFaceBgeEmbeddings(
-            model_name=model_name,
-            model_kwargs=model_kwargs,
-            encode_kwargs=encode_kwargs,
-            cache_folder="models"  # 缓存模型到本地
+        # 使用最简单的配置
+        embeddings = HuggingFaceEmbeddings(
+            model_name="shibing624/text2vec-base-chinese",
+            cache_folder="models"
         )
         return embeddings
     except Exception as e:
