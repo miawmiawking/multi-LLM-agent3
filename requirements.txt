@@ -1,5 +1,3 @@
-# 基础依赖
-python==3.11.7
 numpy==1.24.3
 streamlit==1.32.0
 chardet==5.2.0
@@ -7,34 +5,20 @@ pygments==2.19.1
 markdown-it-py==3.0.0
 mdurl==0.1.2
 rich==13.9.4
-
-# 音频处理
 pydub==0.25.1
 ffmpeg-python==0.2.0
-
-# LangChain相关
 langchain-community==0.0.10
 langchain==0.1.0
 langchain-text-splitters==0.0.1
-
-# 向量数据库和嵌入模型
 chromadb==0.4.18
 sentence-transformers==2.2.2
 transformers==4.36.2
 torch==2.1.2
 huggingface-hub==0.19.4
-
-# 搜索相关
 duckduckgo-search==4.1.1
-
-# 文件处理
 python-docx==1.0.1
 PyPDF2==3.0.1
 openpyxl==3.1.2
-
-# 网络请求
 requests==2.31.0
 beautifulsoup4==4.12.2
-
-# AI模型
 openai==1.3.7
