@@ -19,8 +19,8 @@ torch>=2.1.2
 chardet>=5.2.0
 pydub>=0.25.1
 ffmpeg-python>=0.2.0
-transformers==4.36.2
-torch==2.1.2
+transformers>=4.36.2
+torch==2.1.2 --index-url https://download.pytorch.org/whl/cpu
 torchvision==0.16.2
 torchaudio==2.1.2
 protobuf>=4.25.1
