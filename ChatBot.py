@@ -3,7 +3,6 @@ import streamlit as st
 from langchain_community.tools import DuckDuckGoSearchRun
 import PyPDF2
 from docx import Document
-import pandas as pd
 import chardet
 import base64
 import io
@@ -21,6 +20,7 @@ from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 import re
 from urllib.parse import urlparse
+import csv
 
 # 全局变量定义
 CHROMADB_PATH = None
@@ -601,35 +601,53 @@ def handle_file_upload(uploaded_files):
             st.error(f"文件处理失败 ({file_name}): {str(e)}")
 
 def extract_text_from_file(file):
-    """从不同类型的文件中提取文本内容"""
+    """从不同类型的文件中提取文本"""
     try:
         file_type = file.name.split('.')[-1].lower()
-        content = file.read()
         
         if file_type == 'txt':
-            # 处理文本文件
-            return content.decode('utf-8')
+            return file.getvalue().decode('utf-8')
+            
         elif file_type == 'pdf':
-            # 处理 PDF 文件
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
-            return "\n".join([page.extract_text() for page in pdf_reader.pages])
+            pdf_reader = PyPDF2.PdfReader(file)
+            text = ''
+            for page in pdf_reader.pages:
+                text += page.extract_text() + '\n'
+            return text
+            
         elif file_type in ['docx', 'doc']:
-            # 处理 Word 文件
-            doc = Document(io.BytesIO(content))
-            return "\n".join([para.text for para in doc.paragraphs])
-        elif file_type in ['csv', 'xlsx', 'xls']:
-            # 处理表格文件
-            if file_type == 'csv':
-                df = pd.read_csv(io.BytesIO(content))
-            else:
-                df = pd.read_excel(io.BytesIO(content))
-            return df.to_string()
+            doc = Document(file)
+            return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
+            
+        elif file_type in ['csv']:
+            return process_csv_file(file)
+            
+        elif file_type in ['xlsx', 'xls']:
+            # 如果需要处理 Excel 文件，可以使用 openpyxl
+            import openpyxl
+            wb = openpyxl.load_workbook(file)
+            text = []
+            for sheet in wb.sheetnames:
+                ws = wb[sheet]
+                for row in ws.rows:
+                    text.append(' '.join(str(cell.value) for cell in row if cell.value))
+            return '\n'.join(text)
+            
         else:
-            st.warning(f"不支持的文件类型：{file_type}")
+            st.error(f"不支持的文件类型：{file_type}")
             return None
+            
     except Exception as e:
         st.error(f"处理文件失败：{str(e)}")
         return None
+
+def process_csv_file(file):
+    content = []
+    csv_data = file.read().decode('utf-8').splitlines()
+    csv_reader = csv.reader(csv_data)
+    for row in csv_reader:
+        content.append(' '.join(row))
+    return '\n'.join(content)
 
 def perform_visual_analysis(image_content):
     """使用 moonshot-v1-8k-vision-preview 模型进行视觉分析"""
