@@ -1,15 +1,16 @@
 import requests
 import streamlit as st
-from langchain_community.tools import DuckDuckGoSearchRun
+from langchain.tools import DuckDuckGoSearchRun
 import PyPDF2
 from docx import Document
+import pandas as pd
 import chardet
 import base64
 import io
 from langchain.docstore.document import Document as LC_Document # 新增 langchain 相关依赖
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import Chroma
 from langchain.chains import RetrievalQA
 from langchain.llms import HuggingFaceHub
 import tempfile
@@ -20,7 +21,6 @@ from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 import re
 from urllib.parse import urlparse
-import csv
 
 # 全局变量定义
 CHROMADB_PATH = None
@@ -129,7 +129,7 @@ if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
 
 # 页面配置
-st.set_page_config(page_title="多模型智能助手2.0", layout="wide")
+st.set_page_config(page_title="多模型智能助手", layout="wide")
 
 # 初始化/加载 langchain 封装的 Chroma 向量库
 def get_vector_store():
@@ -142,8 +142,8 @@ def get_vector_store():
     try:
         # 初始化 embeddings
         embeddings = HuggingFaceEmbeddings(
-            model_name="shibing624/text2vec-base-chinese",
-            cache_folder="models"
+            model_name="all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'}
         )
         
         # 创建向量库实例
@@ -431,21 +431,6 @@ def handle_response(response, rag_data=None):
         return None
 
 # 使用 langchain 实现 RAG：加载文档、分割、嵌入、索引
-def get_embeddings():
-    """获取 embeddings 实例"""
-    try:
-        # 使用最简单的配置
-        embeddings = HuggingFaceEmbeddings(
-            model_name="shibing624/text2vec-base-chinese",
-            cache_folder="models"
-        )
-        return embeddings
-    except Exception as e:
-        st.error(f"初始化 embeddings 失败：{str(e)}")
-        import traceback
-        st.error(f"详细错误：{traceback.format_exc()}")
-        return None
-
 def rag_index_document(content, source):
     """将文档添加到向量数据库"""
     try:
@@ -466,39 +451,38 @@ def rag_index_document(content, source):
             st.error("⚠️ 文本分割后为空")
             return False
             
-        # 获取 embeddings
-        embeddings = get_embeddings()
-        if not embeddings:
-            return False
+        # 初始化 embeddings
+        embeddings = HuggingFaceEmbeddings(
+            model_name="all-MiniLM-L6-v2",
+            model_kwargs={'device': 'cpu'}
+        )
         
         # 创建或获取向量库实例
-        try:
-            vectorstore = Chroma(
-                collection_name=COLLECTION_NAME,
-                embedding_function=embeddings,
-                persist_directory=st.session_state.chromadb_path
-            )
-        except Exception as e:
-            st.error(f"创建向量库实例失败：{str(e)}")
-            return False
+        vectorstore = Chroma(
+            collection_name=COLLECTION_NAME,
+            embedding_function=embeddings,
+            persist_directory=st.session_state.chromadb_path
+        )
         
         # 为每个文本块添加源信息
         metadatas = [{"source": source} for _ in texts]
         
         # 添加文档
-        try:
-            vectorstore.add_texts(
-                texts=texts,
-                metadatas=metadatas
-            )
-            vectorstore.persist()
-            st.session_state.vector_store = vectorstore
-            st.info(f"✅ 成功添加 {len(texts)} 个文本块到知识库")
-            return True
-        except Exception as e:
-            st.error(f"添加文本到向量库失败：{str(e)}")
-            return False
-            
+        vectorstore.add_texts(
+            texts=texts,
+            metadatas=metadatas
+        )
+        
+        # 保存更改
+        vectorstore.persist()
+        
+        # 更新会话状态
+        st.session_state.vector_store = vectorstore
+        
+        # 打印调试信息
+        st.info(f"✅ 成功添加 {len(texts)} 个文本块到知识库")
+        return True
+        
     except Exception as e:
         st.error(f"❌ 添加文档到向量库失败：{str(e)}")
         import traceback
@@ -617,53 +601,35 @@ def handle_file_upload(uploaded_files):
             st.error(f"文件处理失败 ({file_name}): {str(e)}")
 
 def extract_text_from_file(file):
-    """从不同类型的文件中提取文本"""
+    """从不同类型的文件中提取文本内容"""
     try:
         file_type = file.name.split('.')[-1].lower()
+        content = file.read()
         
         if file_type == 'txt':
-            return file.getvalue().decode('utf-8')
-            
+            # 处理文本文件
+            return content.decode('utf-8')
         elif file_type == 'pdf':
-            pdf_reader = PyPDF2.PdfReader(file)
-            text = ''
-            for page in pdf_reader.pages:
-                text += page.extract_text() + '\n'
-            return text
-            
+            # 处理 PDF 文件
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(content))
+            return "\n".join([page.extract_text() for page in pdf_reader.pages])
         elif file_type in ['docx', 'doc']:
-            doc = Document(file)
-            return '\n'.join([paragraph.text for paragraph in doc.paragraphs])
-            
-        elif file_type in ['csv']:
-            return process_csv_file(file)
-            
-        elif file_type in ['xlsx', 'xls']:
-            # 如果需要处理 Excel 文件，可以使用 openpyxl
-            import openpyxl
-            wb = openpyxl.load_workbook(file)
-            text = []
-            for sheet in wb.sheetnames:
-                ws = wb[sheet]
-                for row in ws.rows:
-                    text.append(' '.join(str(cell.value) for cell in row if cell.value))
-            return '\n'.join(text)
-            
+            # 处理 Word 文件
+            doc = Document(io.BytesIO(content))
+            return "\n".join([para.text for para in doc.paragraphs])
+        elif file_type in ['csv', 'xlsx', 'xls']:
+            # 处理表格文件
+            if file_type == 'csv':
+                df = pd.read_csv(io.BytesIO(content))
+            else:
+                df = pd.read_excel(io.BytesIO(content))
+            return df.to_string()
         else:
-            st.error(f"不支持的文件类型：{file_type}")
+            st.warning(f"不支持的文件类型：{file_type}")
             return None
-            
     except Exception as e:
         st.error(f"处理文件失败：{str(e)}")
         return None
-
-def process_csv_file(file):
-    content = []
-    csv_data = file.read().decode('utf-8').splitlines()
-    csv_reader = csv.reader(csv_data)
-    for row in csv_reader:
-        content.append(' '.join(row))
-    return '\n'.join(content)
 
 def perform_visual_analysis(image_content):
     """使用 moonshot-v1-8k-vision-preview 模型进行视觉分析"""
@@ -1198,7 +1164,7 @@ with st.sidebar:
 # ====================
 # 主界面布局
 # ====================
-st.title("🤖 多模型智能助手2.0")
+st.title("🤖 多模型智能助手")
 
 # 文件和网址上传区域
 st.markdown("### 📁 文件上传")
@@ -1454,6 +1420,8 @@ for msg in st.session_state.messages:
             st.image(msg["content"])
         else:
             st.write(msg["content"])
+
+
 
 
 
