@@ -9,8 +9,7 @@ import base64
 import io
 from langchain.docstore.document import Document as LC_Document # 新增 langchain 相关依赖
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS  # 替换 Chroma
 from langchain.chains import RetrievalQA
 from langchain.llms import HuggingFaceHub
 import tempfile
@@ -21,6 +20,8 @@ from bs4 import BeautifulSoup
 from duckduckgo_search import DDGS
 import re
 from urllib.parse import urlparse
+import pickle
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # 全局变量定义
 CHROMADB_PATH = None
@@ -133,35 +134,39 @@ st.set_page_config(page_title="多模型智能助手", layout="wide")
 
 # 初始化/加载 langchain 封装的 Chroma 向量库
 def get_vector_store():
-    """获取或创建向量数据库实例"""
-    # 检查是否已设置路径
-    if not st.session_state.get("chromadb_path"):
-        st.error("⚠️ 请先在侧边栏设置 ChromaDB 存储路径！")
-        return None
-    
+    """获取向量数据库实例"""
     try:
-        # 初始化 embeddings
-        embeddings = HuggingFaceEmbeddings(
-            model_name="all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'}
-        )
+        # 使用临时目录作为存储路径
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        db_path = os.path.join(temp_dir, "faiss_index")
         
-        # 创建向量库实例
-        vectorstore = Chroma(
-            collection_name=COLLECTION_NAME,
-            embedding_function=embeddings,
-            persist_directory=st.session_state.chromadb_path
-        )
+        # 更新session state中的路径
+        st.session_state.chromadb_path = temp_dir
         
-        # 检查集合是否为空
-        if vectorstore._collection.count() == 0:
-            st.warning("⚠️ 知识库为空，请先上传文件或网址。")
+        # 获取 embeddings
+        embeddings = get_embeddings()
+        if not embeddings:
             return None
             
-        return vectorstore
+        # 如果存在现有索引，则加载
+        if os.path.exists(db_path):
+            with open(db_path, "rb") as f:
+                vectorstore = pickle.load(f)
+                # 更新 embeddings
+                vectorstore._embedding_function = embeddings
+                return vectorstore
+                
+        # 否则创建新的向量库
+        return FAISS.from_texts(
+            texts=["初始化文档"],  # 需要至少一个文档初始化
+            embedding=embeddings
+        )
         
     except Exception as e:
-        st.error(f"❌ 初始化向量库失败：{str(e)}")
+        st.error(f"初始化向量库失败：{str(e)}")
+        import traceback
+        st.error(f"详细错误：{traceback.format_exc()}")
         return None
 
 # 初始化 DuckDuckGo 搜索工具
@@ -434,9 +439,9 @@ def handle_response(response, rag_data=None):
 def rag_index_document(content, source):
     """将文档添加到向量数据库"""
     try:
-        # 检查内容和路径
-        if not content or not st.session_state.chromadb_path:
-            st.error("⚠️ 内容为空或未设置存储路径")
+        # 检查内容
+        if not content:
+            st.error("⚠️ 内容为空")
             return False
             
         # 文本分割
@@ -451,40 +456,40 @@ def rag_index_document(content, source):
             st.error("⚠️ 文本分割后为空")
             return False
             
-        # 初始化 embeddings
-        embeddings = HuggingFaceEmbeddings(
-            model_name="all-MiniLM-L6-v2",
-            model_kwargs={'device': 'cpu'}
-        )
+        # 获取向量库实例
+        vectorstore = get_vector_store()
+        if not vectorstore:
+            return False
         
-        # 创建或获取向量库实例
-        vectorstore = Chroma(
-            collection_name=COLLECTION_NAME,
-            embedding_function=embeddings,
-            persist_directory=st.session_state.chromadb_path
-        )
-        
-        # 为每个文本块添加源信息
-        metadatas = [{"source": source} for _ in texts]
-        
-        # 添加文档
-        vectorstore.add_texts(
-            texts=texts,
-            metadatas=metadatas
-        )
-        
-        # 保存更改
-        vectorstore.persist()
-        
-        # 更新会话状态
-        st.session_state.vector_store = vectorstore
-        
-        # 打印调试信息
-        st.info(f"✅ 成功添加 {len(texts)} 个文本块到知识库")
-        return True
-        
+        try:
+            # 添加文档
+            metadatas = [{"source": source} for _ in texts]
+            vectorstore.add_texts(
+                texts=texts,
+                metadatas=metadatas
+            )
+            
+            # 保存向量库
+            import tempfile
+            temp_dir = tempfile.gettempdir()
+            db_path = os.path.join(temp_dir, "faiss_index")
+            
+            with open(db_path, "wb") as f:
+                pickle.dump(vectorstore, f)
+            
+            # 更新会话状态
+            st.session_state.vector_store = vectorstore
+            if source not in st.session_state.rag_data:
+                st.session_state.rag_data.append(source)
+            st.info(f"✅ 成功添加 {len(texts)} 个文本块到知识库")
+            return True
+            
+        except Exception as e:
+            st.error(f"添加文档失败：{str(e)}")
+            return False
+            
     except Exception as e:
-        st.error(f"❌ 添加文档到向量库失败：{str(e)}")
+        st.error(f"❌ 处理文档失败：{str(e)}")
         import traceback
         st.error(f"详细错误：{traceback.format_exc()}")
         return False
@@ -766,20 +771,21 @@ def fetch_url_content(url):
         return None
 
 def clear_vector_store():
-    """清除向量数据库中的所有数据"""
+    """清空向量数据库"""
     try:
-        # 获取向量存储实例
-        vectorstore = get_vector_store()
-        if vectorstore:
-            # 删除集合中的所有数据
-            vectorstore.delete_collection()
-            # 重新创建空集合
-            vectorstore = get_vector_store()
-            # 清空会话状态中的数据记录
-            st.session_state.rag_data = []
-            return True
+        import tempfile
+        temp_dir = tempfile.gettempdir()
+        db_path = os.path.join(temp_dir, "faiss_index")
+        
+        if os.path.exists(db_path):
+            os.remove(db_path)
+            
+        st.session_state.vector_store = None
+        st.session_state.rag_data = []
+        st.success("✅ 知识库已清空")
+        return True
     except Exception as e:
-        st.error(f"清除向量数据库失败：{str(e)}")
+        st.error(f"清空知识库失败：{str(e)}")
         return False
 
 def clean_text(text):
@@ -1029,6 +1035,21 @@ def process_urls(urls_input):
                 st.error(f"❌ 访问网址 {url} 失败：{str(e)}")
             except Exception as e:
                 st.error(f"❌ 处理网址 {url} 时出错：{str(e)}")
+
+def get_embeddings():
+    """获取 embeddings 实例"""
+    try:
+        # 使用中文基础模型
+        embeddings = HuggingFaceEmbeddings(
+            model_name="shibing624/text2vec-base-chinese",
+            cache_folder="models"
+        )
+        return embeddings
+    except Exception as e:
+        st.error(f"初始化 embeddings 失败：{str(e)}")
+        import traceback
+        st.error(f"详细错误：{traceback.format_exc()}")
+        return None
 
 # ====================
 # 侧边栏配置
